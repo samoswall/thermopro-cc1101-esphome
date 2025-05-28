@@ -1,0 +1,206 @@
+substitutions:
+  device_name: cc1101
+
+external_components:
+  - source: github://gabest11/esphome-cc1101@main
+    components: [ cc1101 ]
+#  - source:
+#      type: local
+#      path: components
+
+esphome:
+  name: ${device_name}
+
+esp32:
+  board: nodemcu-32s
+  variant: esp32
+  framework:
+    type: arduino
+#  framework:
+#    type: esp-idf
+#    version: recommended
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+  level: DEBUG
+
+ota:
+  - platform: esphome
+    password: "12345678"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+spi:
+  clk_pin: GPIO18
+  miso_pin: GPIO19
+  mosi_pin: GPIO23
+
+
+  
+remote_transmitter:
+  pin: 
+    number: GPIO32
+    allow_other_uses: true
+  carrier_duty_percent: 100%
+
+remote_receiver:
+  pin: 
+    number: GPIO33
+    allow_other_uses: true
+  tolerance: 25%
+  #buffer_size: 2kb
+  filter: 250us
+  idle: 250ms
+  dump: raw
+  on_raw:
+    then:
+      - lambda: |
+          static bool start_found = false;
+          static std::vector<int> bits;
+          auto raw = x; // x - это вектор с raw данными
+          ESP_LOGD("Remote Receiver", "Code Size: %i", raw.size());
+          size_t i = 0;
+          while (i < raw.size()) {
+            if (!start_found) { // поиск стартового импульса
+              if (abs(raw[i] - 450) < 90 && abs(raw[i+1] + 8550) < 200) {
+                start_found = true;
+                bits.clear();
+                i += 2;
+              } else {
+                i += 1;
+              }
+            } else {
+              if (i + 1 >= raw.size()) break;
+
+              int pos = raw[i];
+              int neg = raw[i+1];
+
+              if (abs(neg + 1900) < 300) { // логический 0
+                bits.push_back(0);
+              } else if (abs(neg + 3800) < 300) { // логическая 1
+                bits.push_back(1);
+              } else {
+                i += 2;
+                start_found = false;
+                continue;
+              }
+              i += 2;
+              if (bits.size() == 36) { // если собрали 36 бит
+                if (abs(raw[i+1] + 2350) < 200) {
+                  uint8_t type = 0;
+                  uint8_t id = 0;
+                  int16_t temp = 0;
+                  if (bits[16] == 1) { // отрицательная температура
+                    temp = -1; 
+                  }
+                  uint8_t humid = 0;
+                  uint8_t batt = 0;
+                  uint8_t butt = 0;
+                  uint8_t chan = 0;
+                  for (int bit = 0; bit < 4; ++bit) { // type device
+                    type = (type << 1) | bits[bit];
+                  }
+                  for (int bit = 4; bit < 12; ++bit) { // ID device (генерируется при установке батареек, зависит от заряда батареек)
+                    id = (id << 1) | bits[bit];
+                  }
+                  batt = bits[12]; // Батарея 0 - Ok, 1 - Low
+                  butt = bits[13]; // Нажата кнопка TX
+                  for (int bit = 14; bit < 16; ++bit) { // Канал: 00 - 1 канал, 01 - 2 канал, 10 - 3 канал
+                    chan = (chan << 1) | bits[bit];
+                  }
+                  for (int bit = 16; bit < 28; ++bit) { // Температура 12 бит
+                    temp = (temp << 1) | bits[bit];
+                  }
+                  for (int bit = 28; bit < 36; ++bit) { // Влажность
+                    humid = (humid << 1) | bits[bit];
+                  }
+                  ESP_LOGD("Remote Receiver", "Decoded: type: %i id: %i battery: %i button: %i channel: %i temperature: %i humidity: %i", type, id, batt, butt, chan, temp, humid);
+                  id(thermopro_type).publish_state(type);
+                  id(thermopro_id).publish_state(id);
+                  id(thermopro_temp).publish_state(temp / 10.0);
+                  id(thermopro_humid).publish_state(humid);
+                  if (batt == 0) {
+                    id(thermopro_battery).publish_state("Ok");
+                  } else {
+                    id(thermopro_battery).publish_state("Low");
+                  }
+                  id(thermopro_channal).publish_state(chan + 1);
+                  id(thermopro_button).publish_state(butt);
+                  start_found = false;
+                  break;
+                } else {
+                  start_found = false;
+                }
+              }
+            }
+          }
+          
+
+sensor:
+  - platform: cc1101
+    id: transceiver
+    cs_pin: GPIO5
+    gdo0: 
+      number: GPIO32
+      allow_other_uses: true
+    gdo2: 
+      number: GPIO33
+      allow_other_uses: true
+    bandwidth: 200
+    frequency: 868000
+    rssi:
+      name: "${device_name} rssi"
+#    lqi:
+#      name: "${device_name} lqi"
+  - platform: template
+    name: "ThermoPro Temperature"
+    id: thermopro_temp
+    unit_of_measurement: "°C"
+    icon: "mdi:thermometer"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 1
+  - platform: template
+    name: "ThermoPro Humidity"
+    id: thermopro_humid
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    device_class: "humidity"
+    state_class: "measurement"
+    accuracy_decimals: 0
+  - platform: template
+    name: "ThermoPro ID"
+    id: thermopro_id
+    icon: "mdi:identifier"
+    accuracy_decimals: 0
+  - platform: template
+    name: "ThermoPro Type"
+    id: thermopro_type
+    icon: "mdi:information-box-outline"
+    accuracy_decimals: 0
+  - platform: template
+    name: "ThermoPro Channal"
+    id: thermopro_channal
+    icon: "mdi:numeric"
+    accuracy_decimals: 0
+  - platform: template
+    name: "ThermoPro Button"
+    id: thermopro_button
+    icon: "mdi:button-pointer"
+    accuracy_decimals: 0
+text_sensor:
+  - platform: template
+    name: "ThermoPro Battery"
+    id: thermopro_battery
+    icon: "mdi:battery"
+
+
+api:
+  encryption:
+    key: "YOU_KEY="
