@@ -3,7 +3,8 @@ Receiving measurements from the ThermoPro TX2 868 MHz sensor using the cc1101 mo
 <br>
 Прием и дешифровка сигналов от ThermoPro TX2 с помощью модуля cc1101 868 MГц<br>
 <br>
-<img src="https://github.com/samoswall/thermopro-cc1101-esphome/blob/main/ThermoPro.png" width="600" />
+<img src="https://github.com/samoswall/thermopro-cc1101-esphome/blob/main/ThermoPro.png" height="400" />
+<img src="https://github.com/samoswall/thermopro-cc1101-esphome/blob/main/hass.png" height="400" />
 <br><br>
 Используется компонент для EspHome [https://github.com/gabest11/esphome-cc1101](https://github.com/gabest11/esphome-cc1101)
 <br>
